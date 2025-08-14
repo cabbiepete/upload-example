@@ -17,18 +17,22 @@ export async function GET() {
         const filepath = path.join(uploadsDir, filename)
         const stats = await stat(filepath)
 
-        // Extract timestamp and original name from filename
         const parts = filename.split("-")
-        const timestamp = parts[0]
-        const originalName = parts.slice(1).join("-")
+        const timestampStr = parts[0]
+        const timestamp = Number.parseInt(timestampStr, 10)
+
+        // Validate timestamp and provide fallback
+        const isValidTimestamp = !isNaN(timestamp) && timestamp > 0
+        const originalName = parts.length > 1 ? parts.slice(1).join("-") : filename
+        const uploadDate = isValidTimestamp ? new Date(timestamp) : new Date(stats.birthtime || stats.mtime)
 
         return {
-          id: timestamp,
+          id: isValidTimestamp ? timestamp.toString() : filename,
           name: originalName,
           size: stats.size,
-          type: path.extname(filename).substring(1),
+          type: path.extname(filename).substring(1) || "unknown",
           url: `/uploads/${filename}`,
-          uploadedAt: new Date(Number.parseInt(timestamp)).toISOString(),
+          uploadedAt: uploadDate.toISOString(),
         }
       }),
     )

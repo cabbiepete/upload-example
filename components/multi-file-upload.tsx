@@ -35,13 +35,15 @@ export function MultiFileUpload() {
 
   // Fetch uploaded files using SWR
   const {
-    data: uploadedFiles = [],
+    data: uploadedFilesData,
     error,
     isLoading,
   } = useSWR<UploadedFile[]>("/api/files", fetcher, {
     refreshInterval: 0,
     revalidateOnFocus: false,
   })
+
+  const uploadedFiles = Array.isArray(uploadedFilesData) ? uploadedFilesData : []
 
   const uploadFile = async (file: FileWithProgress) => {
     const formData = new FormData()
