@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import useSWR, { mutate } from 'swr'
 import axios from 'axios'
@@ -9,33 +9,34 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
-import { Upload, X, File, CheckCircle, AlertCircle } from 'lucide-react'
+import {
+  Upload,
+  X,
+  File,
+  CheckCircle,
+  AlertCircle,
+  ExternalLink,
+} from 'lucide-react'
 
-interface UploadedFile {
+// Combined file interface that handles both uploading and uploaded states
+interface FileItem {
   id: string
   name: string
   size: number
   type: string
-  url: string
-  uploadedAt: string
-}
-
-interface FileWithProgress {
-  id: string
-  progress: number
   status: 'uploading' | 'completed' | 'error'
+  progress?: number
   error?: string
-  name: string
-  lastModified: number
-  size: number
-  type: string
-  file: File
+  url?: string
+  uploadedAt?: string
+  file?: File
+  lastModified?: number
 }
 
 const fetcher = (url: string) => axios.get(url).then((res) => res.data)
 
 export function MultiFileUpload() {
-  const [uploadingFiles, setUploadingFiles] = useState<FileWithProgress[]>([])
+  const [files, setFiles] = useState<FileItem[]>([])
   const { toast } = useToast()
 
   // Fetch uploaded files using SWR
@@ -43,50 +44,93 @@ export function MultiFileUpload() {
     data: uploadedFilesData,
     error,
     isLoading,
-  } = useSWR<UploadedFile[]>('/api/files', fetcher, {
+  } = useSWR<FileItem[]>('/api/files', fetcher, {
     refreshInterval: 0,
     revalidateOnFocus: false,
   })
 
-  const uploadedFiles = Array.isArray(uploadedFilesData)
-    ? uploadedFilesData
-    : []
+  // Initialize the files state with uploaded files from API
+  useEffect(() => {
+    if (uploadedFilesData) {
+      // Convert the uploaded files to our FileItem format
+      const uploadedItems = uploadedFilesData.map((file) => ({
+        ...file,
+        status: 'completed' as const,
+        progress: 100,
+      }))
 
-  const uploadFile = async (fileWithProgress: FileWithProgress) => {
+      // Merge with existing files, but avoid duplicates by comparing IDs
+      setFiles((current) => {
+        // Keep all uploading files
+        const uploadingFiles = current.filter(
+          (f) => f.status === 'uploading' || f.status === 'error'
+        )
+
+        // Filter out any uploaded files that may be duplicates
+        const uploadingIds = new Set(uploadingFiles.map((f) => f.id))
+        const newUploadedFiles = uploadedItems.filter(
+          (f) => !uploadingIds.has(f.id)
+        )
+
+        return [...uploadingFiles, ...newUploadedFiles]
+      })
+    }
+  }, [uploadedFilesData])
+
+  const uploadFile = async (fileItem: FileItem) => {
     const formData = new FormData()
-    formData.append('file', fileWithProgress.file)
+    if (fileItem.file) {
+      formData.append('file', fileItem.file)
+    } else {
+      // This should not happen, but just in case
+      toast({
+        title: 'Upload failed',
+        description: `Cannot upload ${fileItem.name}. File data is missing.`,
+        variant: 'destructive',
+      })
+      return
+    }
+
     // Add additional metadata to help server-side processing
-    formData.append('filename', fileWithProgress.name)
-    formData.append('filetype', fileWithProgress.type)
-    formData.append('filesize', fileWithProgress.size?.toString())
+    formData.append('filename', fileItem.name)
+    formData.append('filetype', fileItem.type)
+    formData.append('filesize', fileItem.size?.toString())
 
     try {
-      setUploadingFiles((prev) =>
+      // Update status to uploading
+      setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileWithProgress.id ? { ...f, status: 'uploading' } : f
+          f.id === fileItem.id ? { ...f, status: 'uploading', progress: 0 } : f
         )
       )
 
-      // Use one of two approaches:
-      // 1. Use axios but DON'T set Content-Type (let browser handle it)
+      // Upload the file
       const response = await axios.post('/api/upload', formData, {
-        // Remove the Content-Type header - let the browser set it with the boundary
         onUploadProgress: (progressEvent) => {
           const progress = progressEvent.total
             ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
             : 0
-          setUploadingFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileWithProgress.id ? { ...f, progress } : f
-            )
+          setFiles((prev) =>
+            prev.map((f) => (f.id === fileItem.id ? { ...f, progress } : f))
           )
         },
       })
 
-      setUploadingFiles((prev) =>
+      // Update status to completed when done
+      setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileWithProgress.id
-            ? { ...f, status: 'completed', progress: 100 }
+          f.id === fileItem.id
+            ? {
+                ...f,
+                status: 'completed',
+                progress: 100,
+                // If the response includes the uploaded file details, update those too
+                ...(response.data && {
+                  url: response.data.url,
+                  uploadedAt:
+                    response.data.uploadedAt || new Date().toISOString(),
+                }),
+              }
             : f
         )
       )
@@ -96,13 +140,13 @@ export function MultiFileUpload() {
 
       toast({
         title: 'Upload successful',
-        description: `${fileWithProgress.name} has been uploaded successfully.`,
+        description: `${fileItem.name} has been uploaded successfully.`,
       })
     } catch (error) {
       console.error('Upload error:', error)
-      setUploadingFiles((prev) =>
+      setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileWithProgress.id
+          f.id === fileItem.id
             ? {
                 ...f,
                 status: 'error',
@@ -114,14 +158,14 @@ export function MultiFileUpload() {
 
       toast({
         title: 'Upload failed',
-        description: `Failed to upload ${fileWithProgress.name}. Please try again.`,
+        description: `Failed to upload ${fileItem.name}. Please try again.`,
         variant: 'destructive',
       })
     }
   }
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    const newFiles: FileWithProgress[] = acceptedFiles.map((file) => ({
+    const newFiles: FileItem[] = acceptedFiles.map((file) => ({
       file: file,
       // spread does not grab lastModified, lastModifiedDate, name, size, type,
       // or webkitRelativePath so set these explicitly
@@ -134,14 +178,23 @@ export function MultiFileUpload() {
       status: 'uploading' as const,
     }))
 
-    setUploadingFiles((prev) => [...prev, ...newFiles])
+    setFiles((prev) => [...prev, ...newFiles])
 
     // Upload each file
     newFiles.forEach(uploadFile)
   }, [])
 
-  const removeUploadingFile = (fileId: string) => {
-    setUploadingFiles((prev) => prev.filter((f) => f.id !== fileId))
+  const removeFile = (fileId: string) => {
+    // Find the file to check its status
+    const fileToRemove = files.find((f) => f.id === fileId)
+
+    if (fileToRemove?.status === 'completed') {
+      // If it's a completed upload, we need to delete it from the server
+      deleteUploadedFile(fileId)
+    } else {
+      // For uploading or error files, just remove from state
+      setFiles((prev) => prev.filter((f) => f.id !== fileId))
+    }
   }
 
   const deleteUploadedFile = async (fileId: string) => {
@@ -211,15 +264,25 @@ export function MultiFileUpload() {
         </CardContent>
       </Card>
 
-      {/* Uploading Files */}
-      {uploadingFiles.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Uploading Files</CardTitle>
-          </CardHeader>
-          <CardContent>
+      {/* Combined Files List */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Files</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading && files.length === 0 ? (
+            <p className="text-center text-muted-foreground">
+              Loading files...
+            </p>
+          ) : error && files.length === 0 ? (
+            <p className="text-center text-destructive">Failed to load files</p>
+          ) : files.length === 0 ? (
+            <p className="text-center text-muted-foreground">
+              No files uploaded yet
+            </p>
+          ) : (
             <div className="space-y-4">
-              {uploadingFiles.map((file) => (
+              {files.map((file) => (
                 <div
                   key={file.id}
                   className="flex items-center space-x-4 p-4 border rounded-lg"
@@ -229,6 +292,9 @@ export function MultiFileUpload() {
                     <p className="text-sm font-medium truncate">{file.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {formatFileSize(file.size)}
+                      {file.uploadedAt && (
+                        <> • {new Date(file.uploadedAt).toLocaleDateString()}</>
+                      )}
                     </p>
                     {file.status === 'uploading' && (
                       <Progress value={file.progress} className="mt-2" />
@@ -257,64 +323,20 @@ export function MultiFileUpload() {
                     >
                       {file.status}
                     </Badge>
+                    {file.status === 'completed' && file.url && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(file.url, '_blank')}
+                      >
+                        <ExternalLink className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => removeUploadingFile(file.id)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Uploaded Files */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Uploaded Files</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <p className="text-center text-muted-foreground">
-              Loading files...
-            </p>
-          ) : error ? (
-            <p className="text-center text-destructive">Failed to load files</p>
-          ) : uploadedFiles.length === 0 ? (
-            <p className="text-center text-muted-foreground">
-              No files uploaded yet
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {uploadedFiles.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center space-x-4 p-4 border rounded-lg"
-                >
-                  <File className="h-8 w-8 text-muted-foreground flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatFileSize(file.size)} •{' '}
-                      {new Date(file.uploadedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(file.url, '_blank')}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteUploadedFile(file.id)}
+                      onClick={() => removeFile(file.id)}
                     >
                       <X className="h-4 w-4" />
                     </Button>
