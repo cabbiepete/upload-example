@@ -153,7 +153,7 @@ export function useFileUpload({
 
   // Handle file drops
   const handleFileDrop = useCallback(
-    (acceptedFiles: File[]) => {
+    async (acceptedFiles: File[]) => {
       const newFiles: FileItem[] = acceptedFiles.map((file) => ({
         file: file,
         // spread does not grab lastModified, lastModifiedDate, name, size, type,
@@ -170,8 +170,14 @@ export function useFileUpload({
       // Optimistically add new files to the list
       mutateFiles((currentFiles = []) => [...currentFiles, ...newFiles], false)
 
-      // Upload each file
-      newFiles.forEach(uploadFile)
+      // Upload each file after and await for them all to complete
+      await Promise.all(newFiles.map((fileItem) => uploadFile(fileItem)))
+
+      console.log('all uploads complete, refreshing data...')
+
+      setTimeout(() => {
+        mutateFiles()
+      }, 2000)
     },
     [uploadFile, mutateFiles]
   )
