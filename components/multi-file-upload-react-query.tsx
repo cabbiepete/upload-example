@@ -1,6 +1,12 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
+import {
+  useQuery,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -13,18 +19,48 @@ import {
   AlertCircle,
   ExternalLink,
 } from 'lucide-react'
-import { useFileUpload, FileItem } from '@/hooks/use-file-upload'
+import { useFileUploadWithReactQuery } from '@/hooks/use-file-upload-react-query'
+import { FileItem } from '@/hooks/use-file-upload'
 
-export function MultiFileUpload() {
-  // Use our custom hook for file upload state management with integrated SWR
+// Create a client
+const queryClient = new QueryClient()
+
+// Wrap component in provider
+export function MultiFileUploadWithReactQuery() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <FileUploadComponent />
+    </QueryClientProvider>
+  )
+}
+
+function FileUploadComponent() {
+  // Use our custom hook for file upload state management
   const {
     files,
+    updateFilesFromServerData,
     handleFileDrop,
     removeFile,
     formatFileSize,
-    isLoading,
+  } = useFileUploadWithReactQuery()
+
+  // Fetch uploaded files using React Query
+  const {
+    data: uploadedFilesData,
     error,
-  } = useFileUpload()
+    isLoading,
+  } = useQuery<FileItem[]>({
+    queryKey: ['files'],
+    queryFn: () => fetch('/api/files').then((res) => res.json()),
+    refetchOnWindowFocus: false,
+  })
+
+  // Update files with data from the server
+  useEffect(() => {
+    if (uploadedFilesData) {
+      updateFilesFromServerData(uploadedFilesData)
+    }
+  }, [uploadedFilesData, updateFilesFromServerData])
 
   // Setup dropzone
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
