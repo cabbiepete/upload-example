@@ -15,6 +15,9 @@ export default function Home() {
           <p className="text-blue-700 mb-3">
             If you're experiencing upload issues, try the test pages below:
           </p>
+          <p className="text-green-700 mb-3 font-medium">
+            New! Check out our solution for handling file uploads within nested data structures, solving race conditions and ensuring data consistency during async operations.
+          </p>
           <ul className="list-disc pl-5 space-y-1 text-blue-600">
             <li>
               <Link href="/comparison" className="hover:underline">
@@ -30,6 +33,12 @@ export default function Home() {
               <Link href="/binary-upload" className="hover:underline">
                 Binary Upload Test
               </Link>
+            </li>
+            <li>
+              <Link href="/nested-upload" className="hover:underline">
+                Nested Data Structure Upload
+              </Link>
+              <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">New</span>
             </li>
           </ul>
         </div>
